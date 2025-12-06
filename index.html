@@ -417,7 +417,6 @@
         .cert-signer-job { font-size: 0.6em; margin-right: 10px; }
         .cert-signer-name { font-weight: bold; letter-spacing: 0.1em; }
 
-        /* 印刷設定の改良 */
         @media print {
             /* 共通: ボタンや操作エリア、通知は隠す */
             .btn, .file-controls, .preview-controls, #toast-notification { display: none !important; }
@@ -584,32 +583,54 @@
     });
 
     // --- ユーティリティ ---
-    function formatTimeDigit(ms) { // 計測・画面・CSV用 (分:秒.1/100)
+    function formatTimeDigit(ms) { // 計測・画面・CSV用
         if(!ms && ms !== 0) return "-";
-        const minutes = Math.floor(ms / 60000);
+        const hours = Math.floor(ms / 3600000);
+        const minutes = Math.floor((ms % 3600000) / 60000);
         const seconds = Math.floor((ms % 60000) / 1000);
         const centis = Math.floor((ms % 1000) / 10);
+        
+        if (hours > 0) return `${hours}:${pad(minutes)}:${pad(seconds)}.${pad(centis)}`;
         return `${pad(minutes)}:${pad(seconds)}.${pad(centis)}`;
     }
 
-    function formatTime(ms) { // 記録証用 (分・秒・1/100)
+    function formatTime(ms) { // 記録証用
         if(!ms && ms !== 0) return "-";
-        const minutes = Math.floor(ms / 60000);
+        const hours = Math.floor(ms / 3600000);
+        const minutes = Math.floor((ms % 3600000) / 60000);
         const seconds = Math.floor((ms % 60000) / 1000);
         const centis = Math.floor((ms % 1000) / 10);
+        
+        if (hours > 0) return `${hours}時間${pad(minutes)}分${pad(seconds)}秒${pad(centis)}`;
         return `${minutes}分${pad(seconds)}秒${pad(centis)}`;
     }
 
     function parseTimeStr(str) {
-        // "MM:SS.cc" または "MM:SS" をパースしてミリ秒に
+        // "H:MM:SS.cc" or "MM:SS.cc" or "MM:SS" をパース
         if (!str || str === "-") return null;
+        
+        // 備考欄などでCSVがずれた時のための安全策
+        if (!str.includes(":")) return null;
+
         const parts = str.split(':');
-        if(parts.length < 2) return null;
-        const min = parseInt(parts[0], 10);
-        const secParts = parts[1].split('.');
-        const sec = parseInt(secParts[0], 10);
-        const centi = secParts.length > 1 ? parseInt(secParts[1], 10) : 0;
-        return (min * 60000) + (sec * 1000) + (centi * 10);
+        let h = 0, m = 0, s = 0, c = 0;
+
+        if (parts.length === 3) {
+            // H:MM:SS.cc
+            h = parseInt(parts[0], 10);
+            m = parseInt(parts[1], 10);
+            const secParts = parts[2].split('.');
+            s = parseInt(secParts[0], 10);
+            c = secParts.length > 1 ? parseInt(secParts[1], 10) : 0;
+        } else if (parts.length === 2) {
+            // MM:SS.cc
+            m = parseInt(parts[0], 10);
+            const secParts = parts[1].split('.');
+            s = parseInt(secParts[0], 10);
+            c = secParts.length > 1 ? parseInt(secParts[1], 10) : 0;
+        }
+        
+        return (h * 3600000) + (m * 60000) + (s * 1000) + (c * 10);
     }
 
     function pad(n) { return n < 10 ? '0'+n : n; }
@@ -796,11 +817,27 @@
                 const text = e.target.result;
                 const lines = text.split(/\r\n|\n|\r/).filter(line => line.trim() !== "");
 
-                // 修正版CSVパース: カンマ区切り（引用符内無視）
+                // 修正版CSVパース: カンマ区切り（空欄も維持）
                 const rows = lines.map(line => {
-                    return line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(col => {
-                        return col.trim().replace(/^"|"$/g, '').replace(/""/g, '"');
-                    });
+                    // ダブルクォート内のカンマを無視して分割
+                    const pattern = /(".*?"|[^",\s]+)(?=\s*,|\s*$)/g;
+                    // matchだと空要素が飛ぶことがあるので、splitで実装しなおし
+                    // 単純splitでは引用符内カンマで死ぬため、正規表現で分割
+                    let res = [];
+                    let current = '';
+                    let inQuote = false;
+                    for (let i = 0; i < line.length; i++) {
+                        const c = line[i];
+                        if (c === '"') { inQuote = !inQuote; }
+                        else if (c === ',' && !inQuote) {
+                            res.push(current.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
+                            current = '';
+                            continue;
+                        }
+                        current += c;
+                    }
+                    res.push(current.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
+                    return res;
                 });
 
                 if (rows.length < 2) return alert("データがありません");
@@ -828,6 +865,7 @@
 
                     for (let s = 1; s <= sc; s++) {
                         const baseIdx = 3 + (s - 1) * 4;
+                        // undefinedチェックを追加
                         const rName = cols[baseIdx] || "";
                         const netTimeStr = cols[baseIdx + 1];
                         const finishTimeStr = cols[baseIdx + 2];
@@ -835,7 +873,7 @@
 
                         runners.push(rName);
 
-                        if (netTimeStr && netTimeStr !== "-") {
+                        if (netTimeStr && netTimeStr !== "-" && netTimeStr !== "") {
                             splits.push({
                                 section: s,
                                 runner: rName,
