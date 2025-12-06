@@ -417,33 +417,32 @@
         .cert-signer-job { font-size: 0.6em; margin-right: 10px; }
         .cert-signer-name { font-weight: bold; letter-spacing: 0.1em; }
 
+        /* 印刷設定の改良 */
         @media print {
-            body > * { display: none !important; }
-            #print-preview-modal { 
-                display: block !important; 
-                position: static; 
-                background: none; 
-                width: 100%; height: auto; 
-                overflow: visible;
-            }
-            #print-preview-content {
+            /* 共通: ボタンや操作エリア、通知は隠す */
+            .btn, .file-controls, .preview-controls, #toast-notification { display: none !important; }
+
+            /* --- パターンA: 記録証印刷モード (bodyに.print-modeがある時) --- */
+            body.print-mode .container { display: none !important; } /* 通常コンテンツを隠す */
+            body.print-mode #print-preview-modal {
+                display: block !important;
+                position: absolute; left: 0; top: 0; width: 100%;
                 background: none;
-                padding: 0;
-                display: block;
+                z-index: 9999;
             }
-            .preview-controls { display: none !important; }
-            .certificate-page {
-                box-shadow: none;
-                margin: 0;
-                width: 100%;
-                height: 100%; 
-                page-break-after: always;
+            body.print-mode .certificate-page {
+                box-shadow: none; margin: 0; page-break-after: always;
             }
-            [contenteditable]:hover { background: none; outline: none; }
+
+            /* --- パターンB: 通常印刷モード (bodyに.print-modeがない時) --- */
+            body:not(.print-mode) #print-preview-modal { display: none !important; } /* モーダルを隠す */
+            body:not(.print-mode) .container { width: 100%; max-width: 100%; display: block !important;}
+            body:not(.print-mode) table { width: 100%; border: 1px solid #000; page-break-inside: auto; }
+            body:not(.print-mode) tr { page-break-inside: avoid; page-break-after: auto; }
             
             @page {
-                size: A4 portrait; 
-                margin: 0; 
+                size: A4 portrait;
+                margin: 10mm;
             }
         }
 
@@ -1248,6 +1247,9 @@
 
     // --- 記録証プレビュー・印刷機能 ---
     function openCertificatePreview() {
+        // 印刷モードクラスを追加
+        document.body.classList.add('print-mode');
+
         const wrapper = document.getElementById('certificates-wrapper');
         wrapper.innerHTML = "";
 
@@ -1344,6 +1346,8 @@
     }
 
     function closeCertificatePreview() {
+        // 印刷モードクラスを削除
+        document.body.classList.remove('print-mode');
         document.getElementById('print-preview-modal').style.display = 'none';
     }
 </script>
