@@ -176,7 +176,19 @@
             position: relative;
         }
 
-        .team-header { padding: 10px; text-align: center; font-weight: bold; border-bottom: 1px solid #eee; }
+        /* 順位表示バッジ */
+        .rank-badge {
+            background: #333;
+            color: #fff;
+            font-size: 0.8em;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-left: 8px;
+            font-weight: normal;
+            vertical-align: middle;
+        }
+
+        .team-header { padding: 10px; text-align: center; font-weight: bold; border-bottom: 1px solid #eee; display: flex; justify-content: center; align-items: center; }
         .current-runner { padding: 15px; text-align: center; background: #eef; flex-shrink: 0; }
         .current-runner h4 { margin: 0 0 5px 0; font-size: 0.9em; color: #666; }
         .current-runner p { margin: 0; font-size: 1.2em; font-weight: bold; }
@@ -208,6 +220,20 @@
             border: 2px solid #ffeeba; 
             margin-bottom: 20px;
             border-radius: 8px;
+        }
+        .kuriage-options {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .kuriage-block {
+            background: rgba(255,255,255,0.6);
+            padding: 10px;
+            border-radius: 5px;
+            flex: 1;
+            min-width: 200px;
         }
 
         /* 遅れ走者エリア */
@@ -513,10 +539,20 @@
         </div>
 
         <div id="kuriage-menu" class="hidden">
-            <h3 style="color:var(--kuriage-color)">⚠️ 一斉繰り上げスタート</h3>
-            <p>現在走行中の走者を「まだコース上にいる」状態として残し、<br>次の走者を強制的にスタートさせます。</p>
-            <button class="btn btn-danger" onclick="executeKuriage()">実行する</button>
-            <button class="btn" onclick="toggleKuriageMenu()">キャンセル</button>
+            <h3 style="color:var(--kuriage-color)">⚠️ 繰り上げスタート処理</h3>
+            <div class="kuriage-options">
+                <div class="kuriage-block">
+                    <h4>全チーム一斉</h4>
+                    <p style="font-size:0.9em; margin-bottom:5px;">競技進行上の理由で<br>現在走行中の<strong>全チーム</strong>を繰り上げます</p>
+                    <button class="btn btn-danger" onclick="executeKuriage('all')">一斉繰り上げ実行</button>
+                </div>
+                <div class="kuriage-block">
+                    <h4>遅延チームのみ</h4>
+                    <p style="font-size:0.9em; margin-bottom:5px;">先頭から大きく遅れている<br><strong>後方チームのみ</strong>を繰り上げます</p>
+                    <button class="btn btn-warning" onclick="executeKuriage('delayed')">遅延チームのみ実行</button>
+                </div>
+            </div>
+            <button class="btn" style="margin-top:15px;" onclick="toggleKuriageMenu()">キャンセル</button>
         </div>
 
         <div class="race-grid" id="race-grid"></div>
@@ -819,10 +855,7 @@
 
                 // 修正版CSVパース: カンマ区切り（空欄も維持）
                 const rows = lines.map(line => {
-                    // ダブルクォート内のカンマを無視して分割
                     const pattern = /(".*?"|[^",\s]+)(?=\s*,|\s*$)/g;
-                    // matchだと空要素が飛ぶことがあるので、splitで実装しなおし
-                    // 単純splitでは引用符内カンマで死ぬため、正規表現で分割
                     let res = [];
                     let current = '';
                     let inQuote = false;
@@ -865,7 +898,6 @@
 
                     for (let s = 1; s <= sc; s++) {
                         const baseIdx = 3 + (s - 1) * 4;
-                        // undefinedチェックを追加
                         const rName = cols[baseIdx] || "";
                         const netTimeStr = cols[baseIdx + 1];
                         const finishTimeStr = cols[baseIdx + 2];
@@ -879,7 +911,8 @@
                                 runner: rName,
                                 netTime: parseTimeStr(netTimeStr),
                                 finishTime: parseTimeStr(finishTimeStr),
-                                isKuriage: note.includes("繰り上げ")
+                                isKuriage: note.includes("繰り上げ"),
+                                kuriageType: note.includes("一斉") ? 'all' : (note.includes("遅延") ? 'delayed' : null)
                             });
                         }
                     }
@@ -942,6 +975,7 @@
         document.getElementById('race-panel').classList.remove('hidden');
         document.getElementById('race-title-display').textContent = config.meta.title; 
         renderRaceGrid();
+        refreshRankDisplay(); // 初期順位表示
     }
 
     // --- レース画面描画 ---
@@ -965,6 +999,7 @@
             div.innerHTML = `
                 <div class="team-header" style="background-color:${team.color}22">
                     <span style="font-size:1.1em">${team.name}</span>
+                    <span id="rank-badge-${index}" class="rank-badge">-</span>
                 </div>
                 <div class="current-runner" id="runner-box-${index}">
                     <h4 class="section-label" id="section-label-${index}">現在走行中 (${team.status === 'finished' ? '-' : team.currentSection + 1}区)</h4>
@@ -1008,6 +1043,63 @@
         });
     }
 
+    // --- 順位計算ロジック ---
+    function refreshRankDisplay() {
+        if (!raceState.isRunning && teams.every(t => t.status === 'ready')) {
+            teams.forEach((t, i) => {
+                const el = document.getElementById(`rank-badge-${i}`);
+                if(el) el.textContent = '-';
+            });
+            return;
+        }
+
+        // ソート用にチーム情報を複製してランク付け
+        let sortable = teams.map((t, index) => {
+            // 比較基準:
+            // 1. ゴール済みか？ (Finished > Running)
+            // 2. 走行中/完了した区間の番号 (大きい方が上位)
+            // 3. 最終通過タイム (小さい方が上位)
+            // 4. まだ通過していない(走行中)場合は、区間が同じなら直前の通過タイムで比較
+            
+            let completedSectionCount = t.status === 'finished' ? config.sectionCount : t.currentSection;
+            let lastFinishTime = 0;
+            if (t.splits.length > 0) {
+                lastFinishTime = t.splits[t.splits.length - 1].finishTime;
+            }
+
+            return {
+                originalIndex: index,
+                completedSections: completedSectionCount,
+                finishTime: t.finishTime || Number.MAX_SAFE_INTEGER, // ゴールしていればそのタイム
+                lastSplitTime: lastFinishTime
+            };
+        });
+
+        sortable.sort((a, b) => {
+            // 1. 完了区間数 (降順)
+            if (a.completedSections !== b.completedSections) {
+                return b.completedSections - a.completedSections;
+            }
+            // 2. もしどちらも全区間完了(ゴール)なら、総合タイム(昇順)
+            if (a.completedSections === config.sectionCount) {
+                return a.finishTime - b.finishTime;
+            }
+            // 3. 同じ区間を走行中なら、直前の通過タイム(昇順)
+            // 区間1走行中(完了0)の場合は全員同列(0)だが、スタート同時なので優劣なし
+            return a.lastSplitTime - b.lastSplitTime;
+        });
+
+        // ランク反映
+        sortable.forEach((item, rank) => {
+            const el = document.getElementById(`rank-badge-${item.originalIndex}`);
+            if (el) {
+                // スタート直後などでタイム差がない場合は順位を表示しない、等の制御も可能だが
+                // ここでは単純に表示する
+                el.textContent = `No.${rank + 1}`;
+            }
+        });
+    }
+
     // --- 計測ロジック ---
     function startTimer() {
         if(raceState.isRunning) return;
@@ -1017,6 +1109,7 @@
         document.getElementById('btn-start').textContent = "レース進行中";
         
         teams.forEach((t, i) => { t.status = 'running'; t.currentSection = 0; updateTeamUI(i); });
+        refreshRankDisplay();
 
         raceState.timerInterval = setInterval(() => {
             const diff = Date.now() - raceState.startTime;
@@ -1042,6 +1135,7 @@
             finishTime: finishTimeMs,
             netTime: netTime,
             isKuriage: false,
+            kuriageType: null,
             isStraggler: false
         });
 
@@ -1058,6 +1152,7 @@
             team.finishTime = nextStartTime; 
         }
         updateTeamUI(teamIndex);
+        refreshRankDisplay(); // 順位更新
         checkAllFinished();
     }
 
@@ -1086,10 +1181,14 @@
         [...team.splits].reverse().forEach(split => {
              const div = document.createElement('div');
              div.className = 'history-item';
+             let markText = '';
+             if (split.isKuriage) {
+                 markText = split.kuriageType === 'all' ? '(一斉繰)' : '(繰)';
+             }
              div.innerHTML = `
                 <div>
                     <span>${split.section}区 ${split.runner}</span>
-                    ${split.isKuriage ? '<span class="kuriage-mark">(繰)</span>' : ''}
+                    <span class="kuriage-mark">${markText}</span>
                 </div>
                 <div style="text-align:right">
                     <small>区間: ${formatTimeDigit(split.netTime)}</small><br>
@@ -1114,22 +1213,48 @@
         document.getElementById('kuriage-menu').classList.toggle('hidden');
     }
 
-    function executeKuriage() {
+    function executeKuriage(type) {
+        // type: 'all' (一斉) or 'delayed' (遅延のみ)
         if(!raceState.isRunning) return;
         const now = Date.now();
         const currentTimeMs = now - raceState.startTime;
+        
+        // 最も遅れている区間（最小のcurrentSection）を探す
         let minSec = 999;
-        teams.forEach(t => { if(t.status === 'running' && t.currentSection < minSec) minSec = t.currentSection; });
+        let maxSec = -1;
+        teams.forEach(t => { 
+            if(t.status === 'running') {
+                if(t.currentSection < minSec) minSec = t.currentSection;
+                if(t.currentSection > maxSec) maxSec = t.currentSection;
+            } else if (t.status === 'finished') {
+                maxSec = config.sectionCount; // ゴール済みのチームがいる場合
+            }
+        });
+
         if(minSec === 999) { showToast("走行中のチームなし"); return; }
+
+        // 遅延チームのみの場合、先頭と同一区間なら実行しない（遅れていないとみなす）
+        if (type === 'delayed' && minSec >= maxSec) {
+            alert("現在、先頭集団より遅れているチームはありません。\n（全チーム同一区間、または先頭です）");
+            return;
+        }
 
         let count = 0;
         teams.forEach((team, idx) => {
-            if(team.status === 'running' && team.currentSection === minSec) {
+            // 条件判定
+            // all: その区間の走者全員
+            // delayed: その区間が、先頭(maxSec)より後ろの場合のみ
+            const isTarget = (type === 'all') 
+                             ? (team.status === 'running' && team.currentSection === minSec)
+                             : (team.status === 'running' && team.currentSection === minSec && team.currentSection < maxSec);
+
+            if(isTarget) {
                 pendingStragglers.push({
                     teamId: idx,
                     section: team.currentSection + 1,
                     runnerName: team.runners[team.currentSection],
-                    startTime: team.sectionStartTime || 0
+                    startTime: team.sectionStartTime || 0,
+                    kuriageType: type // タイプを保存
                 });
 
                 if (team.currentSection < config.sectionCount - 1) {
@@ -1144,9 +1269,15 @@
             }
         });
 
-        toggleKuriageMenu();
-        renderStragglers();
-        showToast(`${count}チームを一斉繰り上げスタートしました`);
+        if (count > 0) {
+            refreshRankDisplay(); // 繰り上げ後すぐに順位更新
+            toggleKuriageMenu();
+            renderStragglers();
+            const msg = type === 'all' ? "一斉繰り上げスタートしました" : "遅延チームを繰り上げスタートしました";
+            showToast(`${count}チーム ${msg}`);
+        } else {
+            alert("対象となるチームがありませんでした");
+        }
     }
 
     function stragglerArrive(psIndex) {
@@ -1163,12 +1294,14 @@
             finishTime: finishTimeMs,
             netTime: netTime,
             isKuriage: true,
+            kuriageType: ps.kuriageType, // 保存したタイプを使用
             isStraggler: true
         });
         team.splits.sort((a,b) => a.section - b.section);
         pendingStragglers.splice(psIndex, 1);
         renderStragglers();
         updateTeamUI(ps.teamId); 
+        refreshRankDisplay(); // 到着時に順位変動の可能性あり
         showToast(`${team.name} 前走者が到着しました`);
     }
 
@@ -1212,7 +1345,10 @@
             for(let i=1; i<=config.sectionCount; i++) {
                 const split = t.splits.find(s => s.section === i);
                 if(split) {
-                    let mark = split.isKuriage ? '<span style="color:red; font-size:0.8em">(繰)</span>' : '';
+                    let mark = '';
+                    if(split.isKuriage) {
+                        mark = split.kuriageType === 'all' ? '<span style="color:red; font-size:0.8em">(一斉繰)</span>' : '<span style="color:red; font-size:0.8em">(繰)</span>';
+                    }
                     html += `<td><strong>${formatTimeDigit(split.netTime)}</strong><br><small style="color:#666">${split.runner}</small> ${mark}</td>`;
                 } else {
                     html += `<td>-</td>`;
@@ -1270,7 +1406,10 @@
             for(let i=1; i<=config.sectionCount; i++) {
                 const split = t.splits.find(s => s.section === i);
                 if(split) {
-                    let note = split.isKuriage ? "繰り上げ" : "";
+                    let note = "";
+                    if (split.isKuriage) {
+                        note = split.kuriageType === 'all' ? "繰り上げ(一斉)" : "繰り上げ(遅延)";
+                    }
                     row.push(`"${split.runner}"`, formatTimeDigit(split.netTime), formatTimeDigit(split.finishTime), note);
                 } else { row.push("-", "-", "-", "-"); }
             }
