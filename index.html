@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>駅伝計測システム Pro (記録証機能付)</title>
+    <title>駅伝計測システム Pro (Complete Edition)</title>
     <style>
         :root {
             --primary-color: #333;
@@ -289,6 +289,17 @@
         th, td { border: 1px solid #ddd; padding: 6px; text-align: center; }
         th { background-color: #f2f2f2; }
         
+        /* 編集可能なセル */
+        td[contenteditable="true"] {
+            background-color: #fffff0;
+            cursor: text;
+        }
+        td[contenteditable="true"]:focus {
+            background-color: #fff;
+            outline: 2px solid var(--accent-color);
+            z-index: 10;
+        }
+
         .colored-rank {
             color: white;
             text-shadow: 0 1px 2px rgba(0,0,0,0.8);
@@ -358,16 +369,6 @@
             page-break-inside: avoid;
         }
 
-        [contenteditable]:hover {
-            background-color: rgba(255, 255, 0, 0.1);
-            outline: 1px dashed #ccc;
-            cursor: text;
-        }
-        [contenteditable]:focus {
-            background-color: rgba(255, 255, 0, 0.2);
-            outline: none;
-        }
-        
         .cert-frame {
             position: absolute;
             top: 10mm; left: 10mm; right: 10mm; bottom: 10mm;
@@ -488,31 +489,76 @@
         .cert-signer-job { font-size: 0.6em; margin-right: 10px; }
         .cert-signer-name { font-weight: bold; letter-spacing: 0.1em; }
 
+        /* =========================================
+           印刷用スタイル（1ページ収め修正版）
+           ========================================= */
         @media print {
-            /* 共通: ボタンや操作エリア、通知は隠す */
-            .btn, .file-controls, .preview-controls, #toast-notification { display: none !important; }
+            html, body {
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 100% !important;
+                height: 100% !important;
+            }
 
-            /* --- パターンA: 記録証印刷モード (bodyに.print-modeがある時) --- */
-            body.print-mode .container { display: none !important; } /* 通常コンテンツを隠す */
+            .btn, .file-controls, .preview-controls, #toast-notification, .container { 
+                display: none !important; 
+            }
+
+            body.print-mode {
+                background: white !important;
+            }
+
             body.print-mode #print-preview-modal {
                 display: block !important;
-                position: absolute; left: 0; top: 0; width: 100%;
-                background: none;
-                z-index: 9999;
-            }
-            body.print-mode .certificate-page {
-                box-shadow: none; margin: 0; page-break-after: always;
+                position: static !important;
+                width: 100% !important;
+                height: auto !important;
+                background: transparent !important;
+                overflow: visible !important;
+                z-index: auto !important;
             }
 
-            /* --- パターンB: 通常印刷モード (bodyに.print-modeがない時) --- */
-            body:not(.print-mode) #print-preview-modal { display: none !important; } /* モーダルを隠す */
-            body:not(.print-mode) .container { width: 100%; max-width: 100%; display: block !important;}
-            body:not(.print-mode) table { width: 100%; border: 1px solid #000; page-break-inside: auto; }
-            body:not(.print-mode) tr { page-break-inside: avoid; page-break-after: auto; }
+            body.print-mode #print-preview-content {
+                display: block !important;
+                background: transparent !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                border: none !important;
+                width: 100% !important;
+            }
+            
+            body.print-mode #certificates-wrapper {
+                display: block !important;
+                width: 100% !important;
+            }
+
+            body.print-mode .certificate-page {
+                box-shadow: none !important;
+                margin: 0 auto !important;
+                /* プリンター余白を考慮し297mmより少し小さく設定 */
+                height: 290mm !important; 
+                width: 100% !important;
+                
+                page-break-after: always !important;
+                break-after: page !important;
+                page-break-inside: avoid !important;
+                
+                overflow: hidden !important;
+                background: white !important;
+                position: relative !important;
+            }
+
+            body.print-mode .certificate-page:last-child {
+                page-break-after: auto !important;
+                break-after: auto !important;
+            }
+            
+            body:not(.print-mode) #print-preview-modal { display: none !important; }
+            body:not(.print-mode) .container { width: 100%; display: block !important; }
             
             @page {
                 size: A4 portrait;
-                margin: 10mm;
+                margin: 0; 
             }
         }
 
@@ -568,9 +614,8 @@
 
         <div id="records-setup" class="hidden records-setup-area">
             <h3>過去の大会記録 (目標タイム設定)</h3>
-            <p style="font-size:0.85em; color:#666; margin-top:-5px;">※入力すると「大会新」「区間新」の判定が行われます（形式: 分:秒 または 時:分:秒）</p>
-            <div class="records-grid" id="records-inputs">
-                </div>
+            <p style="font-size:0.85em; color:#666; margin-top:-5px;">※入力すると「大会新」「区間新」の判定が行われます</p>
+            <div class="records-grid" id="records-inputs"></div>
         </div>
 
         <div id="teams-setup" class="team-setup-grid"></div>
@@ -595,12 +640,12 @@
             <div class="kuriage-options">
                 <div class="kuriage-block">
                     <h4>全チーム一斉</h4>
-                    <p style="font-size:0.9em; margin-bottom:5px;">競技進行上の理由で<br>現在走行中の<strong>全チーム</strong>を繰り上げます</p>
+                    <p style="font-size:0.9em; margin-bottom:5px;">現在走行中の<strong>全チーム</strong>を繰り上げます</p>
                     <button class="btn btn-danger" onclick="executeKuriage('all')">一斉繰り上げ実行</button>
                 </div>
                 <div class="kuriage-block">
                     <h4>遅延チームのみ</h4>
-                    <p style="font-size:0.9em; margin-bottom:5px;">先頭から大きく遅れている<br><strong>後方チームのみ</strong>を繰り上げます</p>
+                    <p style="font-size:0.9em; margin-bottom:5px;"><strong>後方チームのみ</strong>を繰り上げます</p>
                     <button class="btn btn-warning" onclick="executeKuriage('delayed')">遅延チームのみ実行</button>
                 </div>
             </div>
@@ -616,7 +661,11 @@
     </div>
 
     <div id="result-panel" class="hidden" style="background: white; padding: 20px; margin-top: 20px;">
-        <h2>レース結果</h2>
+        <h2>レース結果（編集可能）</h2>
+        <p style="text-align:center; font-size:0.9em; color:#666;">
+            ※表のセルをクリックして修正できます。修正後は自動で再計算されます。<br>
+            ※備考欄に「OP」「参考」「代理」と入力すると、その区間は区間順位から除外されます。
+        </p>
         <div style="text-align:center;">
             <button class="btn btn-success" onclick="downloadExcel()">Excel(CSV)ダウンロード</button>
             <button class="btn btn-warning" onclick="openCertificatePreview()">🖨️ 記録証を発行 (編集・印刷)</button>
@@ -636,12 +685,11 @@
 <div id="print-preview-modal">
     <div id="print-preview-content">
         <div class="preview-controls">
-            <span style="align-self:center; font-weight:bold;">印刷プレビュー (文字をクリックして編集可能)</span>
+            <span style="align-self:center; font-weight:bold;">印刷プレビュー</span>
             <button class="btn btn-success" onclick="window.print()">🖨️ 印刷する</button>
             <button class="btn btn-danger" onclick="closeCertificatePreview()">閉じる</button>
         </div>
-        <div id="certificates-wrapper">
-            </div>
+        <div id="certificates-wrapper"></div>
     </div>
 </div>
 
@@ -652,7 +700,7 @@
         sectionCount: 5,
         teamCount: 3,
         distances: [],
-        records: { total: null, sections: [] } // 記録保持用
+        records: { total: null, sections: [] } 
     };
     
     let teams = []; 
@@ -660,11 +708,10 @@
 
     let raceState = {
         startTime: null,
-        timerInterval: null,
+        timerId: null, // requestAnimationFrame ID
         isRunning: false
     };
 
-    // 初期化：日付入力を現在日時に
     document.addEventListener('DOMContentLoaded', () => {
         const now = new Date();
         now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
@@ -672,7 +719,10 @@
     });
 
     // --- ユーティリティ ---
-    function formatTimeDigit(ms) { // 計測・画面・CSV用
+    function pad(n) { return n < 10 ? '0'+n : n; }
+    
+    // 常に2桁の小数部 (1/100秒) を表示
+    function formatTimeDigit(ms) {
         if(!ms && ms !== 0) return "-";
         const hours = Math.floor(ms / 3600000);
         const minutes = Math.floor((ms % 3600000) / 60000);
@@ -683,7 +733,8 @@
         return `${pad(minutes)}:${pad(seconds)}.${pad(centis)}`;
     }
 
-    function formatTime(ms) { // 記録証用
+    // 記録証用
+    function formatTime(ms) {
         if(!ms && ms !== 0) return "-";
         const hours = Math.floor(ms / 3600000);
         const minutes = Math.floor((ms % 3600000) / 60000);
@@ -694,37 +745,37 @@
         return `${minutes}分${pad(seconds)}秒${pad(centis)}`;
     }
 
+    // タイム文字列解析 (厳密)
     function parseTimeStr(str) {
-        // "H:MM:SS.cc" or "MM:SS.cc" or "MM:SS" をパース
-        if (!str || str === "-" || str === "") return null;
-        
-        // 全角数字やコロンを半角に変換
-        str = str.replace(/[０-９：]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
-
-        if (!str.includes(":")) return null;
-
+        if (!str || str === "-" || str === "") return 0;
+        str = str.replace(/[０-９：．]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)).trim();
         const parts = str.split(':');
-        let h = 0, m = 0, s = 0, c = 0;
+        let h = 0, m = 0, s = 0, ms = 0;
 
-        if (parts.length === 3) {
-            // H:MM:SS
-            h = parseInt(parts[0], 10);
-            m = parseInt(parts[1], 10);
-            const secParts = parts[2].split('.');
-            s = parseInt(secParts[0], 10);
-            c = secParts.length > 1 ? parseInt(secParts[1], 10) : 0;
-        } else if (parts.length === 2) {
-            // MM:SS
-            m = parseInt(parts[0], 10);
-            const secParts = parts[1].split('.');
-            s = parseInt(secParts[0], 10);
-            c = secParts.length > 1 ? parseInt(secParts[1], 10) : 0;
+        if (parts.length > 0) {
+            let secStr = parts[parts.length - 1];
+            if (secStr.includes('.')) {
+                const secParts = secStr.split('.');
+                s = parseInt(secParts[0], 10);
+                let decimalStr = secParts[1];
+                if (decimalStr.length === 1) ms = parseInt(decimalStr) * 100;
+                else if (decimalStr.length === 2) ms = parseInt(decimalStr) * 10;
+                else if (decimalStr.length >= 3) ms = parseInt(decimalStr.slice(0, 3));
+            } else {
+                s = parseInt(secStr, 10);
+            }
         }
-        
-        return (h * 3600000) + (m * 60000) + (s * 1000) + (c * 10);
+        if (parts.length > 1) m = parseInt(parts[parts.length - 2], 10);
+        if (parts.length > 2) h = parseInt(parts[parts.length - 3], 10);
+
+        if (isNaN(h)) h = 0;
+        if (isNaN(m)) m = 0;
+        if (isNaN(s)) s = 0;
+        if (isNaN(ms)) ms = 0;
+
+        return (h * 3600000) + (m * 60000) + (s * 1000) + ms;
     }
     
-    // 逆変換（入力欄の復元用: ms -> MM:SS）
     function formatTimeForInput(ms) {
         if(!ms && ms !== 0) return "";
         const hours = Math.floor(ms / 3600000);
@@ -733,8 +784,6 @@
         if (hours > 0) return `${hours}:${pad(minutes)}:${pad(seconds)}`;
         return `${pad(minutes)}:${pad(seconds)}`;
     }
-
-    function pad(n) { return n < 10 ? '0'+n : n; }
 
     function getRandomColor() {
         const letters = '0123456789ABCDEF';
@@ -759,7 +808,6 @@
         config.sectionCount = sc;
         config.teamCount = tc;
 
-        // 距離設定生成
         const distContainer = document.getElementById('distance-inputs');
         distContainer.innerHTML = '';
         document.getElementById('distance-setup').classList.remove('hidden');
@@ -768,12 +816,10 @@
             distContainer.innerHTML += `<div>${i}区: <input type="number" class="dist-val" style="width:50px" value="${val}">km</div>`;
         }
 
-        // 大会記録設定生成
         const recordsContainer = document.getElementById('records-inputs');
         recordsContainer.innerHTML = '';
         document.getElementById('records-setup').classList.remove('hidden');
         
-        // 総合記録
         const totalVal = formatTimeForInput(config.records.total);
         recordsContainer.innerHTML += `
             <div class="record-input-group">
@@ -781,7 +827,6 @@
                 <input type="text" id="record-total" value="${totalVal}" placeholder="1:05:30" style="width:80px; text-align:center;">
             </div>`;
         
-        // 各区間記録
         for(let i=1; i<=sc; i++){
             const secVal = formatTimeForInput(config.records.sections[i-1]);
             recordsContainer.innerHTML += `
@@ -791,8 +836,6 @@
                 </div>`;
         }
 
-
-        // チーム設定生成
         const teamsContainer = document.getElementById('teams-setup');
         teamsContainer.innerHTML = '';
         
@@ -815,7 +858,7 @@
                 <label>チーム名: <input type="text" class="team-name" value="${currentTeam.name}"></label><br>
                 <label>タスキ色: <input type="color" class="team-color" value="${currentTeam.color}"></label>
                 <div style="margin-top:10px;">
-                    <strong>走者順 (ドラッグで入替可):</strong>
+                    <strong>走者順:</strong>
                     <ul class="runner-sort-list" id="runner-list-${i}">
                         ${runnerListHtml}
                     </ul>
@@ -917,7 +960,6 @@
                 const data = JSON.parse(e.target.result);
                 document.getElementById('section-count').value = data.sectionCount;
                 document.getElementById('team-count').value = data.teamCount;
-                
                 if(data.meta) {
                     document.getElementById('meta-title').value = data.meta.title || "";
                     document.getElementById('meta-date').value = data.meta.date || "";
@@ -925,12 +967,10 @@
                     document.getElementById('meta-job').value = data.meta.job || "";
                     document.getElementById('meta-rep').value = data.meta.rep || "";
                 }
-
                 config.sectionCount = data.sectionCount;
                 config.teamCount = data.teamCount;
                 config.distances = data.distances;
-                config.records = data.records || { total: null, sections: [] }; // 記録がない場合のフォールバック
-
+                config.records = data.records || { total: null, sections: [] }; 
                 teams = data.teamsData.map(t => ({ name: t.name, color: t.color, runners: t.runners }));
                 generateSetupGrid();
                 showToast("設定を読み込みました");
@@ -939,19 +979,19 @@
         reader.readAsText(file);
     }
 
-    // --- CSV読み込み (復元) ---
+    // --- CSV読み込み (復元・カラー対応) ---
     function loadResultCSV(input) {
         const file = input.files[0];
         if (!file) return;
         const reader = new FileReader();
+        reader.readAsText(file, 'UTF-8');
+
         reader.onload = function(e) {
             try {
                 const text = e.target.result;
                 const lines = text.split(/\r\n|\n|\r/).filter(line => line.trim() !== "");
 
-                // 修正版CSVパース: カンマ区切り（空欄も維持）
                 const rows = lines.map(line => {
-                    const pattern = /(".*?"|[^",\s]+)(?=\s*,|\s*$)/g;
                     let res = [];
                     let current = '';
                     let inQuote = false;
@@ -972,10 +1012,17 @@
                 if (rows.length < 2) return alert("データがありません");
 
                 const header = rows[0];
-                let sc = 0;
-                header.forEach(h => { if (h.match(/\d+区走者/)) sc++; });
+                const colCount = header.length;
+                
+                // ヘッダー判定：順位(0), チーム名(1), 色(2)?, 総合タイム...
+                // 新フォーマットは色があるためオフセットが変わる
+                let hasColorCol = header[2] === "チームカラー" || (rows[1] && rows[1][2] && rows[1][2].startsWith('#'));
+                let offset = hasColorCol ? 4 : 3;
 
-                if (sc === 0) return alert("有効な駅伝結果CSVではありません");
+                let sc = Math.floor((colCount - offset) / 4);
+                let scFromText = 0;
+                header.forEach(h => { if (h && h.match(/\d+区走者/)) scFromText++; });
+                if (scFromText > 0) sc = scFromText;
 
                 config.sectionCount = sc;
                 config.teamCount = rows.length - 1;
@@ -985,30 +1032,37 @@
                 teams = [];
                 for (let i = 1; i < rows.length; i++) {
                     const cols = rows[i];
-                    // CSV構造: Rank, TeamName, FinishTime, Runner1, Net1, Finish1, Note1...
+                    if(cols.length < 3) continue;
+
                     const teamName = cols[1];
-                    const finishTime = parseTimeStr(cols[2]);
+                    const teamColor = hasColorCol ? cols[2] : getRandomColor();
                     
                     const runners = [];
                     const splits = [];
+                    let calculatedTotalTime = 0; 
 
                     for (let s = 1; s <= sc; s++) {
-                        const baseIdx = 3 + (s - 1) * 4;
+                        const baseIdx = offset + (s - 1) * 4;
+                        if (baseIdx >= cols.length) break;
+
                         const rName = cols[baseIdx] || "";
                         const netTimeStr = cols[baseIdx + 1];
-                        const finishTimeStr = cols[baseIdx + 2];
                         const note = cols[baseIdx + 3] || "";
 
                         runners.push(rName);
 
                         if (netTimeStr && netTimeStr !== "-" && netTimeStr !== "") {
+                            const parsedNetTime = parseTimeStr(netTimeStr);
+                            if (parsedNetTime > 0) calculatedTotalTime += parsedNetTime;
+
                             splits.push({
                                 section: s,
                                 runner: rName,
-                                netTime: parseTimeStr(netTimeStr),
-                                finishTime: parseTimeStr(finishTimeStr),
+                                netTime: parsedNetTime,
+                                finishTime: calculatedTotalTime, 
                                 isKuriage: note.includes("繰り上げ"),
-                                kuriageType: note.includes("一斉") ? 'all' : (note.includes("遅延") ? 'delayed' : null)
+                                kuriageType: note.includes("一斉") ? 'all' : (note.includes("遅延") ? 'delayed' : null),
+                                note: note // 備考を保持
                             });
                         }
                     }
@@ -1016,12 +1070,12 @@
                     teams.push({
                         id: i - 1,
                         name: teamName,
-                        color: getRandomColor(),
+                        color: teamColor,
                         runners: runners,
                         currentSection: sc, 
                         splits: splits,
                         status: 'finished',
-                        finishTime: finishTime
+                        finishTime: calculatedTotalTime
                     });
                 }
 
@@ -1038,17 +1092,15 @@
                 };
                 config.meta = meta;
 
-                // レコード設定が未ロードの場合、CSVからは復元できないため空で進める（または前回の設定維持）
                 generateResultTable();
                 generateSectionRanking();
                 showToast("結果CSVからデータを復元しました");
 
             } catch (err) {
                 console.error(err);
-                alert("CSV読込エラー: 形式が不正です");
+                alert("CSV読込エラー: " + err);
             }
         };
-        reader.readAsText(file);
     }
 
 
@@ -1073,7 +1125,7 @@
         document.getElementById('race-panel').classList.remove('hidden');
         document.getElementById('race-title-display').textContent = config.meta.title; 
         renderRaceGrid();
-        refreshRankDisplay(); // 初期順位表示
+        refreshRankDisplay(); 
     }
 
     // --- レース画面描画 ---
@@ -1122,9 +1174,7 @@
         const zone = document.getElementById('straggler-zone');
         const list = document.getElementById('straggler-list');
         list.innerHTML = '';
-        
         if (pendingStragglers.length === 0) { zone.classList.add('hidden'); return; }
-
         zone.classList.remove('hidden');
         pendingStragglers.forEach((ps, idx) => {
             const team = teams[ps.teamId];
@@ -1141,50 +1191,40 @@
         });
     }
 
-    // --- 順位計算ロジック ---
+    // --- 順位計算ロジック (軽量化) ---
     function refreshRankDisplay() {
-        if (!raceState.isRunning && teams.every(t => t.status === 'ready')) {
-            teams.forEach((t, i) => {
-                const el = document.getElementById(`rank-badge-${i}`);
-                if(el) el.textContent = '-';
-            });
-            return;
+        if (!raceState.isRunning) {
+            if(teams.every(t => t.status === 'ready')){
+               teams.forEach((t, i) => {
+                   const el = document.getElementById(`rank-badge-${i}`);
+                   if(el) el.textContent = '-';
+               });
+               return;
+            }
         }
 
-        let sortable = teams.map((t, index) => {
-            let completedSectionCount = t.status === 'finished' ? config.sectionCount : t.currentSection;
-            let lastFinishTime = 0;
-            if (t.splits.length > 0) {
-                lastFinishTime = t.splits[t.splits.length - 1].finishTime;
-            }
-
-            return {
-                originalIndex: index,
-                completedSections: completedSectionCount,
-                finishTime: t.finishTime || Number.MAX_SAFE_INTEGER,
-                lastSplitTime: lastFinishTime
-            };
-        });
+        // 必要な情報だけ抽出してソート
+        let sortable = teams.map((t, index) => ({
+            index: index,
+            completed: t.status === 'finished' ? config.sectionCount : t.currentSection,
+            finishTime: t.finishTime || Number.MAX_SAFE_INTEGER,
+            lastSplitTime: (t.splits.length > 0) ? t.splits[t.splits.length - 1].finishTime : 0
+        }));
 
         sortable.sort((a, b) => {
-            if (a.completedSections !== b.completedSections) {
-                return b.completedSections - a.completedSections;
-            }
-            if (a.completedSections === config.sectionCount) {
-                return a.finishTime - b.finishTime;
-            }
+            if (a.completed !== b.completed) return b.completed - a.completed;
+            if (a.completed === config.sectionCount) return a.finishTime - b.finishTime;
             return a.lastSplitTime - b.lastSplitTime;
         });
 
+        // DOM操作を最小限に
         sortable.forEach((item, rank) => {
-            const el = document.getElementById(`rank-badge-${item.originalIndex}`);
-            if (el) {
-                el.textContent = `No.${rank + 1}`;
-            }
+            const el = document.getElementById(`rank-badge-${item.index}`);
+            if (el) el.textContent = `No.${rank + 1}`;
         });
     }
 
-    // --- 計測ロジック ---
+    // --- 計測ロジック (ラグ解消: requestAnimationFrame) ---
     function startTimer() {
         if(raceState.isRunning) return;
         raceState.startTime = Date.now();
@@ -1195,10 +1235,13 @@
         teams.forEach((t, i) => { t.status = 'running'; t.currentSection = 0; updateTeamUI(i); });
         refreshRankDisplay();
 
-        raceState.timerInterval = setInterval(() => {
+        const timerLoop = () => {
+            if (!raceState.isRunning) return;
             const diff = Date.now() - raceState.startTime;
             document.getElementById('timer-display').textContent = formatTimeDigit(diff);
-        }, 10);
+            raceState.timerId = requestAnimationFrame(timerLoop);
+        };
+        raceState.timerId = requestAnimationFrame(timerLoop);
         document.querySelectorAll('.btn-tasuki').forEach(b => b.disabled = false);
     }
 
@@ -1220,7 +1263,7 @@
             netTime: netTime,
             isKuriage: false,
             kuriageType: null,
-            isStraggler: false
+            note: ""
         });
 
         advanceSection(teamIndex, finishTimeMs);
@@ -1236,6 +1279,8 @@
             team.finishTime = nextStartTime; 
         }
         updateTeamUI(teamIndex);
+        // ラグ防止: 即座に全ソート計算せず、少し遅延させるか、ここでは必須の更新だけにする
+        // 今回は軽量化したのでそのまま呼ぶ
         refreshRankDisplay(); 
         checkAllFinished();
     }
@@ -1244,43 +1289,25 @@
         const team = teams[index];
         const card = document.getElementById('race-grid').children[index];
         
-        const sectionLabel = card.querySelector(`#section-label-${index}`);
-        if(team.status === 'finished') {
-            sectionLabel.textContent = "現在走行中 (-)";
-        } else {
-            sectionLabel.textContent = `現在走行中 (${team.currentSection + 1}区)`;
-        }
+        card.querySelector(`#section-label-${index}`).textContent = 
+            team.status === 'finished' ? "現在走行中 (-)" : `現在走行中 (${team.currentSection + 1}区)`;
 
         const runnerNameEl = card.querySelector(`#runner-name-${index}`);
-        if(team.status === 'finished') {
-            runnerNameEl.textContent = "ゴール";
-            runnerNameEl.style.color = "red";
-        } else {
-            runnerNameEl.textContent = team.runners[team.currentSection] || `走者${team.currentSection+1}`;
-            runnerNameEl.style.color = "black";
-        }
+        runnerNameEl.textContent = team.status === 'finished' ? "ゴール" : (team.runners[team.currentSection] || `走者${team.currentSection+1}`);
+        runnerNameEl.style.color = team.status === 'finished' ? "red" : "black";
 
         const historyList = card.querySelector(`#history-${index}`);
-        historyList.innerHTML = ''; 
-        [...team.splits].reverse().forEach(split => {
-             const div = document.createElement('div');
-             div.className = 'history-item';
-             let markText = '';
-             if (split.isKuriage) {
-                 markText = split.kuriageType === 'all' ? '(一斉繰)' : '(繰)';
-             }
-             div.innerHTML = `
-                <div>
-                    <span>${split.section}区 ${split.runner}</span>
-                    <span class="kuriage-mark">${markText}</span>
-                </div>
-                <div style="text-align:right">
-                    <small>区間: ${formatTimeDigit(split.netTime)}</small><br>
-                    <span>通過: ${formatTimeDigit(split.finishTime)}</span>
-                </div>
-            `;
-            historyList.appendChild(div);
-        });
+        // 全再描画ではなく、最新のみ追加する方が軽いが、修正の複雑さを避けるため文字列生成を最適化
+        let html = '';
+        for(let i = team.splits.length - 1; i >= 0; i--) {
+            const split = team.splits[i];
+            let mark = split.isKuriage ? (split.kuriageType === 'all' ? '(一斉繰)' : '(繰)') : '';
+            html += `<div class="history-item">
+                <div><span>${split.section}区 ${split.runner}</span><span class="kuriage-mark">${mark}</span></div>
+                <div style="text-align:right"><small>区間:${formatTimeDigit(split.netTime)}</small><br><span>通過:${formatTimeDigit(split.finishTime)}</span></div>
+            </div>`;
+        }
+        historyList.innerHTML = html;
 
         const btn = card.querySelector(`#btn-tasuki-${index}`);
         if(team.status === 'finished') {
@@ -1313,12 +1340,8 @@
             }
         });
 
-        if(minSec === 999) { showToast("走行中のチームなし"); return; }
-
-        if (type === 'delayed' && minSec >= maxSec) {
-            alert("現在、先頭集団より遅れているチームはありません。\n（全チーム同一区間、または先頭です）");
-            return;
-        }
+        if(minSec === 999) return showToast("走行中のチームなし");
+        if (type === 'delayed' && minSec >= maxSec) return alert("現在、先頭集団より遅れているチームはありません。");
 
         let count = 0;
         teams.forEach((team, idx) => {
@@ -1351,10 +1374,7 @@
             refreshRankDisplay(); 
             toggleKuriageMenu();
             renderStragglers();
-            const msg = type === 'all' ? "一斉繰り上げスタートしました" : "遅延チームを繰り上げスタートしました";
-            showToast(`${count}チーム ${msg}`);
-        } else {
-            alert("対象となるチームがありませんでした");
+            showToast(`${count}チーム 繰り上げスタート`);
         }
     }
 
@@ -1373,7 +1393,7 @@
             netTime: netTime,
             isKuriage: true,
             kuriageType: ps.kuriageType, 
-            isStraggler: true
+            note: ""
         });
         team.splits.sort((a,b) => a.section - b.section);
         pendingStragglers.splice(psIndex, 1);
@@ -1384,9 +1404,8 @@
     }
 
     function checkAllFinished() {
-        const allFinished = teams.every(t => t.status === 'finished');
-        if(allFinished && pendingStragglers.length === 0) {
-            clearInterval(raceState.timerInterval);
+        if(teams.every(t => t.status === 'finished') && pendingStragglers.length === 0) {
+            cancelAnimationFrame(raceState.timerId);
             document.getElementById('timer-display').style.color = "#fff";
             document.getElementById('timer-display').textContent += " (全終了)";
             showToast("全チームゴールしました！");
@@ -1395,28 +1414,65 @@
     }
 
     function finishRace() {
-        clearInterval(raceState.timerInterval);
+        cancelAnimationFrame(raceState.timerId);
         document.getElementById('race-panel').classList.add('hidden');
         document.getElementById('result-panel').classList.remove('hidden');
         generateResultTable();
         generateSectionRanking();
     }
 
-    // --- 新記録判定ロジック ---
+    // --- 記録判定 ---
     function isNewSectionRecord(sectionIndex, netTime) {
-        // sectionIndex: 1-based
         if (!config.records || !config.records.sections) return false;
         const record = config.records.sections[sectionIndex - 1];
-        if (record && netTime < record) return true;
-        return false;
+        return (record && netTime < record);
     }
-
     function isNewTotalRecord(totalTime) {
         if (!config.records || !config.records.total) return false;
-        if (totalTime < config.records.total) return true;
-        return false;
+        return (totalTime < config.records.total);
     }
 
+    // --- 結果編集・再計算ロジック ---
+    function updateResultData(teamId, type, section, value) {
+        const team = teams.find(t => t.id == teamId);
+        if(!team) return;
+
+        if (type === 'name') {
+            const split = team.splits.find(s => s.section == section);
+            if(split) split.runner = value;
+        } 
+        else if (type === 'time') {
+            const split = team.splits.find(s => s.section == section);
+            if(split) {
+                split.netTime = parseTimeStr(value);
+                recalculateTeamTimes(team);
+            }
+        }
+        else if (type === 'note') {
+            const split = team.splits.find(s => s.section == section);
+            if(split) {
+                split.note = value;
+                // OPなどが入力された場合、区間順位の再描画が必要
+                generateSectionRanking();
+            }
+        }
+        
+        // 再描画
+        generateResultTable();
+        generateSectionRanking();
+    }
+
+    function recalculateTeamTimes(team) {
+        let total = 0;
+        team.splits.sort((a,b) => a.section - b.section);
+        team.splits.forEach(s => {
+            total += s.netTime;
+            s.finishTime = total;
+        });
+        team.finishTime = total;
+    }
+
+    // --- 結果テーブル生成 (編集可能) ---
     function generateResultTable() {
         const table = document.getElementById('result-table');
         let html = `<thead><tr><th>順位</th><th>チーム名</th><th>総合タイム</th>`;
@@ -1430,7 +1486,6 @@
         });
 
         sortedTeams.forEach((t, rank) => {
-            // 総合新記録判定
             let totalTimeHtml = formatTimeDigit(t.finishTime);
             if (t.finishTime && isNewTotalRecord(t.finishTime)) {
                 totalTimeHtml += '<span class="new-record-badge">大会新</span>';
@@ -1445,14 +1500,16 @@
                 const split = t.splits.find(s => s.section === i);
                 if(split) {
                     let mark = '';
-                    if(split.isKuriage) {
-                        mark = split.kuriageType === 'all' ? '<span style="color:red; font-size:0.8em">(一斉繰)</span>' : '<span style="color:red; font-size:0.8em">(繰)</span>';
-                    }
-                    // 区間新記録判定
-                    if (isNewSectionRecord(i, split.netTime)) {
-                        mark += '<span class="new-record-badge">区間新</span>';
-                    }
-                    html += `<td><strong>${formatTimeDigit(split.netTime)}</strong><br><small style="color:#666">${split.runner}</small> ${mark}</td>`;
+                    if(split.isKuriage) mark = '<span style="color:red; font-size:0.8em">(繰)</span>';
+                    if (isNewSectionRecord(i, split.netTime)) mark += '<span class="new-record-badge">区間新</span>';
+                    
+                    // 編集可能セル
+                    html += `<td>
+                        <div contenteditable="true" onblur="updateResultData(${t.id}, 'time', ${i}, this.innerText)">${formatTimeDigit(split.netTime)}</div>
+                        <div contenteditable="true" style="font-size:0.85em; color:#555;" onblur="updateResultData(${t.id}, 'name', ${i}, this.innerText)">${split.runner}</div>
+                        <div contenteditable="true" style="font-size:0.7em; color:#888; border-top:1px dotted #ccc;" placeholder="備考" onblur="updateResultData(${t.id}, 'note', ${i}, this.innerText)">${split.note || ''}</div>
+                        ${mark}
+                    </td>`;
                 } else {
                     html += `<td>-</td>`;
                 }
@@ -1471,7 +1528,13 @@
             let sectionData = [];
             teams.forEach(t => {
                 const split = t.splits.find(s => s.section === i);
-                if(split) sectionData.push({ teamName: t.name, color: t.color, runner: split.runner, netTime: split.netTime });
+                if(split) {
+                    // オープン参加（OP, 参考, 代理）は除外
+                    const note = (split.note || "").toUpperCase();
+                    if (!note.includes("OP") && !note.includes("参考") && !note.includes("代理")) {
+                        sectionData.push({ teamName: t.name, color: t.color, runner: split.runner, netTime: split.netTime });
+                    }
+                }
             });
             sectionData.sort((a, b) => a.netTime - b.netTime);
 
@@ -1483,9 +1546,7 @@
             
             sectionData.forEach((d, idx) => {
                 let timeHtml = formatTimeDigit(d.netTime);
-                if (isNewSectionRecord(i, d.netTime)) {
-                    timeHtml += '<span class="new-record-badge">区間新</span>';
-                }
+                if (isNewSectionRecord(i, d.netTime)) timeHtml += '<span class="new-record-badge">区間新</span>';
                 html += `<tr>
                     <td class="colored-rank" style="background-color:${d.color};">${idx+1}</td>
                     <td style="text-align:left">${d.runner} <small>(${d.teamName})</small></td>
@@ -1499,9 +1560,11 @@
 
     function downloadExcel() {
         let csvContent = "\ufeff"; 
-        let header = ["順位", "チーム名", "総合タイム"];
+        // 列を追加：チームカラー
+        let header = ["順位", "チーム名", "チームカラー", "総合タイム"];
         for(let i=1; i<=config.sectionCount; i++) header.push(`${i}区走者`, `${i}区間タイム`, `${i}区通過`, "備考");
         csvContent += header.join(",") + "\n";
+
         let sortedTeams = [...teams].sort((a, b) => {
             if (!a.finishTime) return 1;
             if (!b.finishTime) return -1;
@@ -1509,18 +1572,27 @@
         });
 
         sortedTeams.forEach((t, rank) => {
-            let row = [ t.finishTime ? rank + 1 : '-', `"${t.name}"`, formatTimeDigit(t.finishTime) ];
+            let row = [ 
+                t.finishTime ? rank + 1 : '-', 
+                `"${t.name}"`, 
+                t.color, 
+                formatTimeDigit(t.finishTime) // 文字列として出力
+            ];
             for(let i=1; i<=config.sectionCount; i++) {
                 const split = t.splits.find(s => s.section === i);
                 if(split) {
-                    let note = "";
+                    let note = split.note || "";
                     if (split.isKuriage) {
-                        note += split.kuriageType === 'all' ? "繰り上げ(一斉) " : "繰り上げ(遅延) ";
+                        note += split.kuriageType === 'all' ? " (一斉繰)" : " (遅延繰)";
                     }
-                    if (isNewSectionRecord(i, split.netTime)) note += "区間新 ";
-                    if (t.finishTime && i === config.sectionCount && isNewTotalRecord(t.finishTime)) note += "大会新";
-
-                    row.push(`"${split.runner}"`, formatTimeDigit(split.netTime), formatTimeDigit(split.finishTime), note.trim());
+                    if (isNewSectionRecord(i, split.netTime)) note += " 区間新";
+                    
+                    row.push(
+                        `"${split.runner}"`, 
+                        formatTimeDigit(split.netTime), 
+                        formatTimeDigit(split.finishTime), 
+                        `"${note.trim()}"`
+                    );
                 } else { row.push("-", "-", "-", "-"); }
             }
             csvContent += row.join(",") + "\n";
@@ -1532,11 +1604,8 @@
         link.click();
     }
 
-    // --- 記録証プレビュー・印刷機能 ---
     function openCertificatePreview() {
-        // 印刷モードクラスを追加
         document.body.classList.add('print-mode');
-
         const wrapper = document.getElementById('certificates-wrapper');
         wrapper.innerHTML = "";
 
@@ -1558,7 +1627,6 @@
                 <div class="cert-frame"></div>
                 <div class="cert-layer">
                     <div class="cert-title" contenteditable="true">${title}</div>
-                    
                     <div class="cert-header-area">
                         <div class="cert-team-info" contenteditable="true">${teamName}</div>
                         <div class="cert-runner-line">
@@ -1566,10 +1634,8 @@
                             <span class="cert-runner-name" contenteditable="true">${runnerName} 殿</span>
                         </div>
                     </div>
-                    
                     <div class="cert-record-area" contenteditable="true">${recordText}</div>
                     <div class="cert-text" contenteditable="true">${mainText}</div>
-                    
                     <div class="cert-footer">
                         <div class="cert-date" contenteditable="true">${reiwaDateStr}</div>
                         <div class="cert-org" contenteditable="true">${config.meta.org}</div>
@@ -1579,49 +1645,43 @@
                         </div>
                     </div>
                 </div>
-            </div>
-        `;
+            </div>`;
 
         const commonText = `あなたは令和${yearStr}年度${config.meta.title}においてよく奮闘され頭書の成績を収められましたのでその栄誉を讃えこれを賞します`;
 
         teams.forEach(team => {
             const rank = sortedTeams.findIndex(t => t.id === team.id) + 1;
             let rankText = team.finishTime ? `（総合${rank}位）` : `（記録なし）`;
-            
-            // チームの大会新記録判定
-            if (team.finishTime && isNewTotalRecord(team.finishTime)) {
-                rankText += `<span class="cert-new-record-mark">(大会新)</span>`;
-            }
+            if (team.finishTime && isNewTotalRecord(team.finishTime)) rankText += `<span class="cert-new-record-mark">(大会新)</span>`;
 
             team.splits.forEach(split => {
                 const sectionSplits = [];
                 teams.forEach(t => {
                     const s = t.splits.find(sp => sp.section === split.section);
-                    if(s) sectionSplits.push(s);
+                    // OP参加は順位計算から除外
+                    const note = (s.note || "").toUpperCase();
+                    if(s && !note.includes("OP") && !note.includes("参考") && !note.includes("代理")) {
+                        sectionSplits.push(s);
+                    }
                 });
                 sectionSplits.sort((a, b) => a.netTime - b.netTime);
-                const sectionRank = sectionSplits.findIndex(s => s === split) + 1;
-
-                let recordDisplay = `記録 ${formatTime(split.netTime)} (区間${sectionRank}位)`;
                 
-                // 区間新記録判定
-                if (isNewSectionRecord(split.section, split.netTime)) {
-                    recordDisplay += `<span class="cert-new-record-mark">(区間新)</span>`;
+                // 自身の区間順位（OPなら順位なし）
+                let recordDisplay = `記録 ${formatTime(split.netTime)}`;
+                const myNote = (split.note || "").toUpperCase();
+                if(!myNote.includes("OP") && !myNote.includes("参考") && !myNote.includes("代理")) {
+                    const sectionRank = sectionSplits.findIndex(s => s === split) + 1;
+                    recordDisplay += ` (区間${sectionRank}位)`;
+                    if (isNewSectionRecord(split.section, split.netTime)) recordDisplay += `<span class="cert-new-record-mark">(区間新)</span>`;
+                } else {
+                    recordDisplay += ` (参考記録)`;
                 }
 
-                wrapper.insertAdjacentHTML('beforeend', createCertHTML(
-                    "記録証", 
-                    `${team.name}${rankText}`, 
-                    `第${split.section}区`, 
-                    `${split.runner}`, 
-                    recordDisplay, 
-                    commonText 
-                ));
+                wrapper.insertAdjacentHTML('beforeend', createCertHTML("記録証", `${team.name}${rankText}`, `第${split.section}区`, split.runner, recordDisplay, commonText));
             });
         });
 
         document.getElementById('print-preview-modal').style.display = 'block';
-        
         adjustFontSizes();
     }
 
@@ -1631,10 +1691,8 @@
             const line = nameEl.parentNode;
             const sectionInfo = line.querySelector('.cert-section-info');
             const maxWidth = line.clientWidth - sectionInfo.offsetWidth - 50; 
-            
             let fontSize = 4.2; 
             nameEl.style.fontSize = fontSize + 'em';
-            
             while (nameEl.scrollWidth > maxWidth && fontSize > 1.0) {
                 fontSize -= 0.1;
                 nameEl.style.fontSize = fontSize + 'em';
